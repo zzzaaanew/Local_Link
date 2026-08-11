@@ -1,0 +1,9 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# 1회성 스크립트 실행인 경우
+restartPolicyType = "NEVER"
+# 크론잡 설정 (Railway 프로젝트 셋팅에서도 가능)
+# cronSchedule = "0 2 * * *" # 매일 새벽 2시
