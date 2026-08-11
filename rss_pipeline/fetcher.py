@@ -5,18 +5,21 @@ from datetime import datetime
 
 # 신뢰할 수 있는 주요 언론사 RSS 피드 목록 (사회/지역/경제 중심)
 DEFAULT_RSS_FEEDS = [
+    # 사회 (Society)
     "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=03&plink=RSSREADER", # SBS 사회
-    "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=02&plink=RSSREADER", # SBS 경제
     "http://imnews.imbc.com/rss/news/news_04.xml", # MBC 사회
-    "http://imnews.imbc.com/rss/news/news_05.xml", # MBC 경제
     "https://fs.jtbc.co.kr/RSS/society.xml", # JTBC 사회
+    
+    # 경제 (Economy)
+    "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=02&plink=RSSREADER", # SBS 경제
+    "http://imnews.imbc.com/rss/news/news_05.xml", # MBC 경제
     "https://fs.jtbc.co.kr/RSS/economy.xml", # JTBC 경제
-    "https://www.ytn.co.kr/rss/society.xml", # YTN 사회
-    "https://www.ytn.co.kr/rss/economy.xml", # YTN 경제
-    "https://rss.donga.com/society.xml", # 동아일보 사회
-    "https://rss.donga.com/economy.xml", # 동아일보 경제
-    "http://www.hani.co.kr/rss/society/", # 한겨레 사회
-    "http://www.hani.co.kr/rss/economy/", # 한겨레 경제
+    
+    # 지역/전국 (Local/Regional)
+    "https://www.ytn.co.kr/rss/nation.xml", # YTN 전국(지역)
+    "http://www.hani.co.kr/rss/area/", # 한겨레 전국(지역)
+    "https://rss.donga.com/national.xml", # 동아일보 전국(지역)
+    "https://www.khan.co.kr/rss/rssdata/local_news.xml", # 경향신문 전국(지역)
 ]
 
 # 안티 크롤링(403/404) 우회를 위한 헤더 설정
