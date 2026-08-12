@@ -1,7 +1,10 @@
 import feedparser
 import requests
+import logging
 from newspaper import Article, Config
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # 신뢰할 수 있는 주요 언론사 RSS 피드 목록 (사회/지역/경제 중심)
 DEFAULT_RSS_FEEDS = [
@@ -29,7 +32,7 @@ config.browser_user_agent = user_agent
 config.request_timeout = 10
 
 def fetch_rss_feed(feed_url):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Fetching RSS: {feed_url}")
+    logger.info(f"Fetching RSS: {feed_url}")
     try:
         headers = {'User-Agent': user_agent}
         response = requests.get(feed_url, headers=headers, timeout=10)
@@ -43,7 +46,7 @@ def fetch_rss_feed(feed_url):
             })
         return articles
     except Exception as e:
-        print(f"Failed to fetch {feed_url}: {e}")
+        logger.error(f"Failed to fetch {feed_url}: {e}")
         return []
 
 def scrape_article_text(url):
@@ -53,7 +56,7 @@ def scrape_article_text(url):
         article.parse()
         return article.text
     except Exception as e:
-        print(f"Error scraping {url}: {e}")
+        logger.error(f"Error scraping {url}: {e}")
         return ""
 
 def get_articles_from_feeds(feeds=DEFAULT_RSS_FEEDS, max_per_feed=10):
@@ -61,7 +64,6 @@ def get_articles_from_feeds(feeds=DEFAULT_RSS_FEEDS, max_per_feed=10):
     for feed in feeds:
         entries = fetch_rss_feed(feed)
         for entry in entries[:max_per_feed]:
-            # 중복 체크 로직 (여기서는 단순 리스트 통과)
             all_articles.append(entry)
     
     return all_articles

@@ -1,9 +1,12 @@
 import os
 import json
+import logging
 import anthropic
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Claude 클라이언트 초기화
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -72,6 +75,9 @@ def extract_knowledge_graph(text):
             content = content.strip("```").strip()
             
         return json.loads(content)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON Parse Error: {e} \nContent: {content}")
+        return None
     except Exception as e:
-        print(f"Error during extraction: {e}")
+        logger.error(f"Error during extraction: {e}")
         return None
