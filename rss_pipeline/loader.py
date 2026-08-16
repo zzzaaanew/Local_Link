@@ -5,40 +5,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-AURA_URI = os.getenv("NEO4J_URI", "neo4j+s://d8a5f68a.databases.neo4j.io")
-AURA_USER = os.getenv("NEO4J_USERNAME", "d8a5f68a")
-AURA_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
+# 환경변수 (AURA_* 및 NEO4J_* 호환)
+AURA_URI = os.getenv("AURA_URI") or os.getenv("NEO4J_URI", "neo4j+s://d8a5f68a.databases.neo4j.io")
+AURA_USER = os.getenv("AURA_USER") or os.getenv("NEO4J_USERNAME", "d8a5f68a")
+AURA_PASSWORD = os.getenv("AURA_PASSWORD") or os.getenv("NEO4J_PASSWORD", "")
 
 logger = logging.getLogger(__name__)
 
-def is_url_processed(url):
-    """Check if the URL has already been processed and saved in Neo4j."""
-    if not AURA_PASSWORD:
-        return False
-    driver = GraphDatabase.driver(AURA_URI, auth=(AURA_USER, AURA_PASSWORD))
-    try:
-        with driver.session() as session:
-            result = session.run("MATCH (u:ProcessedArticle {url: $url}) RETURN u", url=url)
-            return result.single() is not None
-    except Exception as e:
-        logger.error(f"Error checking URL in DB: {e}")
-        return False
-    finally:
-        driver.close()
+# LLM 생성 관계 타입 화이트리스트 (Cypher Injection 방어)
+ALLOWED_RELATIONSHIPS = {
+    "OPERATES", "RESPONDS_TO", "LOCATED_IN", "HAS_ISSUE", "INVOLVES",
+    "AFFECTED_BY", "MEASURES", "INDICATES", "REQUIRES_CHECK", "SUGGESTS_FRAME",
+    "HAS_INTERVIEW_TARGET", "LOCALIZED_TO", "TARGETS", "CONTRIBUTES_TO",
+    "WORSENS", "HAS_PREVIOUS_PROGRAM", "CONFLICTS_WITH",
+}
 
-def mark_url_processed(url):
-    """Mark the URL as processed in Neo4j."""
-    if not AURA_PASSWORD:
-        return
-    driver = GraphDatabase.driver(AURA_URI, auth=(AURA_USER, AURA_PASSWORD))
-    try:
-        with driver.session() as session:
-            session.run("MERGE (u:ProcessedArticle {url: $url}) ON CREATE SET u.processed_at = datetime()", url=url)
-    except Exception as e:
-        logger.error(f"Error marking URL as processed: {e}")
-    finally:
-        driver.close()
-
+# 지역명 표준화 매핑 딕셔너리
 REGION_NORM_MAP = {
     # 광역/도
     "경상북도": "경북",
@@ -121,6 +103,66 @@ REGION_NORM_MAP = {
     "경남 통영시": "통영시",
 }
 
+logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
+
+_driver = None
+
+def _is_configured() -> bool:
+    return bool(AURA_URI and AURA_USER and AURA_PASSWORD)
+
+def _get_driver():
+    global _driver
+    if _driver is None:
+        _driver = GraphDatabase.driver(AURA_URI, auth=(AURA_USER, AURA_PASSWORD))
+    return _driver
+
+def close():
+    global _driver
+    if _driver is not None:
+        _driver.close()
+        _driver = None
+
+def filter_new_urls(urls):
+    """아직 처리하지 않은 URL만 남긴다 (일괄 쿼리)"""
+    urls = [u for u in (urls or []) if u]
+    if not _is_configured() or not urls:
+        return urls
+    try:
+        with _get_driver().session() as session:
+            done = {
+                r["url"]
+                for r in session.run(
+                    "MATCH (u:ProcessedArticle) WHERE u.url IN $urls RETURN u.url AS url",
+                    urls=urls,
+                )
+            }
+    except Exception as e:
+        logger.error(f"Error checking processed URLs: {e}")
+        return urls
+    if done:
+        logger.info(f"Already processed: {len(done)} of {len(urls)}")
+    return [u for u in urls if u not in done]
+
+def is_url_processed(url):
+    if not _is_configured():
+        return False
+    try:
+        with _get_driver().session() as session:
+            result = session.run("MATCH (u:ProcessedArticle {url: $url}) RETURN u", url=url)
+            return result.single() is not None
+    except Exception as e:
+        logger.error(f"Error checking URL in DB: {e}")
+        return False
+
+def mark_url_processed(url):
+    if not _is_configured():
+        return
+    try:
+        with _get_driver().session() as session:
+            session.run("MERGE (u:ProcessedArticle {url: $url}) ON CREATE SET u.processed_at = datetime()", url=url)
+    except Exception as e:
+        logger.error(f"Error marking URL as processed: {e}")
+
 def _normalize_name(name):
     if not name or not isinstance(name, str):
         return name
@@ -128,7 +170,6 @@ def _normalize_name(name):
     return REGION_NORM_MAP.get(name_clean, name_clean)
 
 def _safe_get_name(node):
-    """Safely extract 'name' from a node dictionary, handling cases where the LLM returned a string instead of a dict."""
     if isinstance(node, dict):
         return node.get("name")
     elif isinstance(node, str):
@@ -136,13 +177,12 @@ def _safe_get_name(node):
     return None
 
 def load_v2_to_neo4j(graph_data):
-    if not graph_data or not AURA_PASSWORD:
+    if not graph_data or not _is_configured():
         logger.warning("Graph data is empty or Neo4j credentials missing.")
         return
 
-    driver = GraphDatabase.driver(AURA_URI, auth=(AURA_USER, AURA_PASSWORD))
     try:
-        with driver.session() as session:
+        with _get_driver().session() as session:
             nodes = graph_data.get("nodes", {})
             relationships = graph_data.get("relationships", [])
 
@@ -162,7 +202,7 @@ def load_v2_to_neo4j(graph_data):
                 status = n.get("status", "") if isinstance(n, dict) else ""
                 session.run("MERGE (x:BaseNode {name: $name}) ON CREATE SET x.program_type=$program_type, x.status=$status ON MATCH SET x.program_type=$program_type, x.status=$status SET x:Program", name=name, program_type=program_type, status=status)
 
-            # LocalRegion (실시간 지명 정규화 적용)
+            # LocalRegion (실시간 정규화)
             for n in nodes.get("local_regions", []):
                 name = _normalize_name(_safe_get_name(n))
                 if not name: continue
@@ -217,12 +257,15 @@ def load_v2_to_neo4j(graph_data):
                 if not name: continue
                 session.run("MERGE (x:BaseNode {name: $name}) SET x:NationalIssue", name=name)
 
-            # 엣지 적재 (관계 연결 대상 지명 정규화 적용)
+            # 엣지 적재 (정규화된 src, tgt 매핑 + 화이트리스트)
             for rel in relationships:
                 if not isinstance(rel, dict):
                     continue
                 rel_type = rel.get("type","").upper().replace(" ","_").replace("-","_")
                 if not rel_type:
+                    continue
+                if rel_type not in ALLOWED_RELATIONSHIPS:
+                    logger.warning("허용되지 않은 관계 타입 무시: %s", rel_type)
                     continue
                 src = _normalize_name(rel.get("source_name",""))
                 tgt = _normalize_name(rel.get("target_name",""))
@@ -235,5 +278,3 @@ def load_v2_to_neo4j(graph_data):
 
     except Exception as e:
         logger.error(f"DB Load Error: {e}")
-    finally:
-        driver.close()
